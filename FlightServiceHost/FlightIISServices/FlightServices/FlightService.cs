@@ -8,8 +8,11 @@ using System.Xml;
 using System.ServiceModel;
 using System.Xml.Serialization;
 using System.IO;
-using FlightIISServices.SupplierData;
 using System.Threading.Tasks;
+using System.Threading;
+using FlightIISServices.Property;
+using FlightIISServices.FlightListCreaterData;
+using FlightIISServices.SupplierData;
 
 namespace FlightIISServices.FlightServices
 {
@@ -17,15 +20,6 @@ namespace FlightIISServices.FlightServices
     public class FlightService : IFlightService
     {
 
-        
-        string mystiflyFlightXMLPath = @"D:\FlightBookingSystem\FlightServiceHost\FlightIISServices\Data\mystifly.xml";
-        string worldSpanFlightXMLPath = @"D:\FlightBookingSystem\FlightServiceHost\FlightIISServices\Data\worldspan.xml";
-        string sabreFlightXMLPath = @"D:\FlightBookingSystem\FlightServiceHost\FlightIISServices\Data\sabre.xml";
-
-        string FlightXMLPath = @"D:\FlightBookingSystem\FlightServiceHost\FlightIISServices\Data\Flights.xml";
-        string BookingDetailsXMLPath = @"D:\FlightBookingSystem\FlightServiceHost\FlightIISServices\Data\BookingDetails.xml";
-        string cardDetailsxmlPath = @"D:\FlightBookingSystem\FlightServiceHost\FlightIISServices\Data\Cards.xml";
-       
         public Result GetFlightsBySourceDestinationTravellersAndClass(string source, string destination, string traveller, string flightClass)
         {
             Result result = new Result();
@@ -36,39 +30,17 @@ namespace FlightIISServices.FlightServices
                 {
                     throw new Exception("Enter valid number of travellers.Travellers number should be atleast 1");
                 }
+                
+                List<List<Flight>> flightList = GetFlightlistFromAllSupplier(source, destination);
+                
+                result = CombineAllFlightLists(result, flightList);
 
-
-                List<Flight> flightListOne = new List<Flight>();
-                List<Flight> flightListTwo = new List<Flight>();
-                List<Flight> flightListThree = new List<Flight>();
-
-                Task<List<Flight>> mystiflyTask = Task<List<Flight>>.Factory.StartNew(() => GetMyStiflyFlightList(source, destination));
-                flightListOne = mystiflyTask.Result;
-
-                Task<List<Flight>> WorldSpanTask = Task<List<Flight>>.Factory.StartNew(() => GetWorldSpanFlightList(source, destination));
-                flightListTwo = WorldSpanTask.Result;
-
-                Task<List<Flight>> SabreTask = Task<List<Flight>>.Factory.StartNew(() => GetSabreFlightList(source, destination));
-                flightListThree = SabreTask.Result;
-
-
-                Task.WaitAll(new Task[] { mystiflyTask,WorldSpanTask, SabreTask },30000);
-                result = CombineAllFlightLists(result, flightListOne, flightListTwo, flightListThree);
-                if (result.FlightList.Count==0)
+                if (result.FlightList.Count == 0)
                 {
                     throw new Exception("No result found.");
                 }
-                
-                return result;
 
-                //XDocument doc = XDocument.Load(FlightXMLPath);
-                //var query = from d in doc.Descendants("Flight")
-                //            where d.Element("Source").Value.Equals(source) && d.Element("Destination").Value.Equals(destination) && Convert.ToInt32(d.Element("Class").Element(flightClass).Element("Available").Value) >= Convert.ToInt32(traveller)
-                //            select d;
-                //if (query == null)
-                //{
-                //    throw new Exception("No result found.");
-                //}
+                return result;
 
             }
             catch (Exception ae)
@@ -81,99 +53,52 @@ namespace FlightIISServices.FlightServices
             
         }
 
-        private static Result CombineAllFlightLists(Result result, List<Flight> flightListOne, List<Flight> flightListTwo, List<Flight> flightListThree)
+        private List<List<Flight>> GetFlightlistFromAllSupplier(string source, string destination)
+        {
+            List<List<Flight>> flightList = new List<List<Flight>>();
+            List<Task<List<Flight>>> taskList = new List<Task<List<Flight>>>();
+            List<ISupplier> supplierList = new List<ISupplier> { new MyStiflySupplier(), new SabreSupplier(), new WorldSpanSupplier() };
+
+            foreach (var supplier in supplierList)
+            {
+                Task<List<Flight>> task = Task<List<Flight>>.Factory.StartNew(() => { Thread.Sleep(9000); return supplier.GetFlightList(source, destination); });
+                taskList.Add(task);
+            }
+
+            Task.WaitAll(taskList.ToArray(), 10000);
+
+            foreach (var task in taskList)
+            {
+                if (task.IsCompleted && !task.IsFaulted)
+                {
+                    flightList.Add(task.Result);
+                }
+            }
+
+            return flightList;
+        }
+
+        private static Result CombineAllFlightLists(Result result, List<List<Flight>> flightList )
         {
             result.Status = true;
             result.Message = "Flight List retrieve successfully !";
-            if (flightListOne.Count > 0)
+
+            foreach (var list in flightList)
             {
-                result.FlightList = (result.FlightList.Union(flightListOne)).ToList();
-            }
-            if (flightListTwo.Count > 0)
-            {
-                result.FlightList = (result.FlightList.Union(flightListTwo)).ToList();
-            }
-            if (flightListThree.Count > 0)
-            {
-                result.FlightList = (result.FlightList.Union(flightListThree)).ToList();
+                if (list.Count > 0)
+                {
+                    result.FlightList = (result.FlightList.Union(list)).ToList();
+                }
+
             }
 
             return result;
-        }
-
-        private List<Flight> GetSabreFlightList(string source, string destination)
-        {
-            List<Flight> flightListThree;
-            XmlSerializer sabreXmlSerializer = new XmlSerializer(typeof(Envelope));
-            StreamReader sabreXmlReader = new StreamReader(sabreFlightXMLPath);
-            Envelope envelopeResult = (Envelope)sabreXmlSerializer.Deserialize(sabreXmlReader);
-            flightListThree = Task.Run(() => Supplier.CreateSabreFlightList(source, destination, envelopeResult)).Result;
-            return flightListThree;
-        }
-
-        private List<Flight> GetWorldSpanFlightList(string source, string destination)
-        {
-            List<Flight> flightListTwo;
-            XmlSerializer worldSpanXmlSerializer = new XmlSerializer(typeof(PSW5));
-            StreamReader worldSpanXmlReader = new StreamReader(worldSpanFlightXMLPath);
-            PSW5 PSW5Result = (PSW5)worldSpanXmlSerializer.Deserialize(worldSpanXmlReader);
-            flightListTwo = Supplier.CreateWorldSpanFlightList(source, destination, PSW5Result);
-            return flightListTwo;
-        }
-
-        private List<Flight> GetMyStiflyFlightList(string source, string destination)
-        {
-            List<Flight> flightListOne;
-            XmlSerializer myStiflyserializer = new XmlSerializer(typeof(OTA_AirLowFareSearchRS));
-            StreamReader myStiflyReader = new StreamReader(mystiflyFlightXMLPath);
-            OTA_AirLowFareSearchRS ota_AirLowFareSearchResult = (OTA_AirLowFareSearchRS)myStiflyserializer.Deserialize(myStiflyReader);
-            flightListOne = Supplier.CreateMyStiflyFlightList(source, destination, ota_AirLowFareSearchResult);
-            return flightListOne;
-        }
-
-
-        private List<Flight> hi(string source, string destination)
-        {
-            List<Flight> flightListOne;
-            XmlSerializer myStiflyserializer = new XmlSerializer(typeof(OTA_AirLowFareSearchRS));
-            StreamReader myStiflyReader = new StreamReader(mystiflyFlightXMLPath);
-            OTA_AirLowFareSearchRS ota_AirLowFareSearchResult = (OTA_AirLowFareSearchRS)myStiflyserializer.Deserialize(myStiflyReader);
-            flightListOne = Supplier.CreateMyStiflyFlightList(source, destination, ota_AirLowFareSearchResult);
-            return flightListOne;
-        }
-
-
-
-
-
-        //private static List<Flight> CreateFlightList(string flightClass, List<Flight> flightList, IEnumerable<XElement> query)
-        //{
-        //    foreach (var q in query)
-        //    {
-        //        flightList.Add(new Flight
-        //        {
-        //            FlightId = q.Element("Id").Value,
-
-        //            Source = q.Element("Source").Value,
-        //            Destination = q.Element("Destination").Value,
-        //            AirlineName = q.Element("AirlineName").Value,
-        //            FlightClass = flightClass,
-        //            DepartureTime = q.Element("DepartureTime").Value,
-        //            ArrivalTime = q.Element("ArrivalTime").Value,
-        //            Price = Convert.ToInt32(q.Element("Class").Element(flightClass).Element("Price").Value),
-        //            Rating=Convert.ToDouble(q.Element("Rating").Value),
-        //            AvailableSeat = Convert.ToInt32(q.Element("Class").Element(flightClass).Element("Available").Value)
-        //        });
-        //    }
-        //    return flightList;
-        //}
-
-
+         }
 
         public string AddNewBooking(Flight flight, Customer customer,int travellers)
         {
             XmlDocument xDoc = new XmlDocument();
-            xDoc.Load(BookingDetailsXMLPath);
+            xDoc.Load(DocumentPath.BookingDetailsXMLPath);
             XmlNode Booking = xDoc.CreateElement("Booking");
             xDoc.DocumentElement.AppendChild(Booking);
 
@@ -243,7 +168,7 @@ namespace FlightIISServices.FlightServices
             Customer.AppendChild(MobileNumber);
             xDoc.DocumentElement.AppendChild(Customer);
 
-            xDoc.Save(BookingDetailsXMLPath);
+            xDoc.Save(DocumentPath.BookingDetailsXMLPath);
             return customer.CustomerId + "-" + flight.FlightId;
         }
 
@@ -279,10 +204,10 @@ namespace FlightIISServices.FlightServices
 
         public string CancelBooking(string bookindId)
         {
-            XDocument doc = XDocument.Load(BookingDetailsXMLPath);
+            XDocument doc = XDocument.Load(DocumentPath.BookingDetailsXMLPath);
             var a = doc.Descendants("Booking").First(x=>x.Element("BookingId").Value.Equals(bookindId));
             a.Element("BookingStatus").Value = "Cancelled";
-            doc.Save(BookingDetailsXMLPath);
+            doc.Save(DocumentPath.BookingDetailsXMLPath);
             return bookindId;
         }
 
@@ -305,7 +230,7 @@ namespace FlightIISServices.FlightServices
                 else
                 {
                     XmlDocument document = new XmlDocument();
-                    document.Load(cardDetailsxmlPath);
+                    document.Load(DocumentPath.cardDetailsxmlPath);
                     XmlNode newCard = document.CreateElement("Card");
                     document.DocumentElement.AppendChild(newCard);
 
@@ -324,7 +249,7 @@ namespace FlightIISServices.FlightServices
                     XmlNode cardHolderName = document.CreateElement("CardHolderName");
                     cardHolderName.InnerText = card.CardHolderName;
                     newCard.AppendChild(cardHolderName);
-                    document.Save(cardDetailsxmlPath);
+                    document.Save(DocumentPath.cardDetailsxmlPath);
 
                     return result;
 

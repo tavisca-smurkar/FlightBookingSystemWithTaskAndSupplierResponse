@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using FlightServiceClientConsole.ClientRef;
 using System.IO;
+using FlightIISServices.Entity;
 
 namespace FlightServiceClientConsole
 {
@@ -42,7 +42,7 @@ namespace FlightServiceClientConsole
                                 Console.WriteLine("Please enter class");
                                 Console.WriteLine("1. Economy");
                                 Console.WriteLine("2. Business");
-                                Console.WriteLine("3 FirstClass");
+                                Console.WriteLine("3. FirstClass");
                                 string choice = Console.ReadLine();
 
                                 switch (choice)
@@ -93,7 +93,7 @@ namespace FlightServiceClientConsole
                                 Console.WriteLine("1. Price Range");
                                 Console.WriteLine("2. AirlineName ");
                                // Console.WriteLine("3. Rating");
-                                Console.WriteLine("You can select multiple options. eg, 1,2,3 ");
+                                Console.WriteLine("You can select multiple options. eg, 1,2");
                                 string filterString = Console.ReadLine();
 
                                 for (int i = 0; i < filterString.Length; i++)
